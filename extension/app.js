@@ -38,7 +38,9 @@ async function fetchOpenTabs() {
     // The new URL for this page is now index.html (not newtab.html)
     const newtabUrl = `chrome-extension://${extensionId}/index.html`;
 
-    const tabs = await chrome.tabs.query({});
+    // windowType: 'normal' excludes PWA (installed app) windows, popups,
+    // and devtools windows — we only care about regular browser tabs.
+    const tabs = await chrome.tabs.query({ windowType: 'normal' });
     openTabs = tabs.map(t => ({
       id:       t.id,
       url:      t.url,
@@ -78,7 +80,7 @@ async function closeTabsByUrls(urls) {
     }
   }
 
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ windowType: 'normal' });
   const toClose = allTabs
     .filter(tab => {
       const tabUrl = tab.url || '';
@@ -103,7 +105,7 @@ async function closeTabsByUrls(urls) {
 async function closeTabsExact(urls) {
   if (!urls || urls.length === 0) return;
   const urlSet = new Set(urls);
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ windowType: 'normal' });
   const toClose = allTabs.filter(t => urlSet.has(t.url)).map(t => t.id);
   if (toClose.length > 0) await chrome.tabs.remove(toClose);
   await fetchOpenTabs();
@@ -117,7 +119,7 @@ async function closeTabsExact(urls) {
  */
 async function focusTab(url) {
   if (!url) return;
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ windowType: 'normal' });
   const currentWindow = await chrome.windows.getCurrent();
 
   // Try exact URL match first
@@ -150,7 +152,7 @@ async function focusTab(url) {
  * keepOne=false → close all copies.
  */
 async function closeDuplicateTabs(urls, keepOne = true) {
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ windowType: 'normal' });
   const toClose = [];
 
   for (const url of urls) {
@@ -178,7 +180,7 @@ async function closeTabOutDupes() {
   const extensionId = chrome.runtime.id;
   const newtabUrl = `chrome-extension://${extensionId}/index.html`;
 
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ windowType: 'normal' });
   const currentWindow = await chrome.windows.getCurrent();
   const tabOutTabs = allTabs.filter(t =>
     t.url === newtabUrl || t.url === 'chrome://newtab/'
@@ -195,6 +197,65 @@ async function closeTabOutDupes() {
   const toClose = tabOutTabs.filter(t => t.id !== keep.id).map(t => t.id);
   if (toClose.length > 0) await chrome.tabs.remove(toClose);
   await fetchOpenTabs();
+}
+
+/**
+ * sortTabs()
+ *
+ * Quick-sort: rearranges tabs in every NORMAL browser window so that
+ * tabs from the same domain sit next to each other (alphabetical by
+ * hostname, then by full URL within a hostname).
+ *
+ * - PWA windows (windowType: 'app') are skipped entirely.
+ * - Pinned tabs stay where they are; only unpinned tabs are reordered.
+ * - The active tab does NOT change; you stay on whatever you were looking at.
+ */
+async function sortTabs() {
+  const windows = await chrome.windows.getAll({
+    populate: true,
+    windowTypes: ['normal'],
+  });
+
+  const getSortKey = (tab) => {
+    try {
+      const u = new URL(tab.url);
+      // Normalize "www." so www.x.com and x.com sort together
+      const host = u.hostname.replace(/^www\./, '').toLowerCase();
+      return host + '\x00' + u.pathname + u.search;
+    } catch {
+      // Unparseable URLs (chrome://, about:blank, etc.) go to the end
+      return '\uffff' + (tab.url || '');
+    }
+  };
+
+  let movedTotal = 0;
+
+  for (const win of windows) {
+    const tabs = win.tabs || [];
+    const unpinned = tabs.filter(t => !t.pinned);
+    if (unpinned.length < 2) continue;
+
+    const sorted = unpinned.slice().sort((a, b) => {
+      const ka = getSortKey(a);
+      const kb = getSortKey(b);
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+
+    // If already sorted, skip this window (avoids a pointless API thrash)
+    const alreadySorted = sorted.every((t, i) => t.id === unpinned[i].id);
+    if (alreadySorted) continue;
+
+    // Move each tab to its target index. Pinned tabs always occupy the
+    // lowest indexes, so unpinned targets start at pinnedCount.
+    const pinnedCount = tabs.length - unpinned.length;
+    for (let i = 0; i < sorted.length; i++) {
+      await chrome.tabs.move(sorted[i].id, { index: pinnedCount + i });
+      movedTotal++;
+    }
+  }
+
+  await fetchOpenTabs();
+  return movedTotal;
 }
 
 
@@ -703,6 +764,7 @@ const ICONS = {
   close:   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>`,
   archive: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" /></svg>`,
   focus:   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg>`,
+  sort:    `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0-3.75-3.75M17.25 21 21 17.25" /></svg>`,
 };
 
 
@@ -1153,7 +1215,7 @@ async function renderStaticDashboard() {
 
   if (domainGroups.length > 0 && openTabsSection) {
     if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn" data-action="sort-all-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.sort} Sort tabs</button> &nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1231,7 +1293,7 @@ document.addEventListener('click', async (e) => {
     if (!tabUrl) return;
 
     // Close the tab in Chrome directly
-    const allTabs = await chrome.tabs.query({});
+    const allTabs = await chrome.tabs.query({ windowType: 'normal' });
     const match   = allTabs.find(t => t.url === tabUrl);
     if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
@@ -1284,7 +1346,7 @@ document.addEventListener('click', async (e) => {
     }
 
     // Close the tab in Chrome
-    const allTabs = await chrome.tabs.query({});
+    const allTabs = await chrome.tabs.query({ windowType: 'normal' });
     const match   = allTabs.find(t => t.url === tabUrl);
     if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
@@ -1412,6 +1474,29 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast('Closed duplicates, kept one copy each');
+    return;
+  }
+
+  // ---- Sort ALL open tabs by domain ----
+  if (action === 'sort-all-tabs') {
+    actionEl.disabled = true;
+    const originalHTML = actionEl.innerHTML;
+    actionEl.innerHTML = 'Sorting…';
+    try {
+      const moved = await sortTabs();
+      if (moved > 0) {
+        showToast(`Sorted ${moved} tab${moved !== 1 ? 's' : ''} by domain`);
+        await renderDashboard();
+      } else {
+        showToast('Tabs already sorted');
+      }
+    } catch (err) {
+      console.error('[tab-out] Sort failed:', err);
+      showToast('Sort failed');
+    } finally {
+      actionEl.disabled = false;
+      actionEl.innerHTML = originalHTML;
+    }
     return;
   }
 

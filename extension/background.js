@@ -23,7 +23,8 @@
  */
 async function updateBadge() {
   try {
-    const tabs = await chrome.tabs.query({});
+    // windowType: 'normal' excludes PWA windows, popups, and devtools
+    const tabs = await chrome.tabs.query({ windowType: 'normal' });
 
     // Only count actual web pages — skip browser internals and extension pages
     const count = tabs.filter(t => {
