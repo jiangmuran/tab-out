@@ -585,6 +585,9 @@ const FRIENDLY_DOMAINS = {
   'www.producthunt.com':  'Product Hunt',
   'xiaohongshu.com':      'RedNote',
   'www.xiaohongshu.com':  'RedNote',
+  'cloudflare.com':       'Cloudflare',
+  'www.cloudflare.com':   'Cloudflare',
+  'dash.cloudflare.com':  'Cloudflare Dashboard',
   'local-files':          'Local Files',
 };
 

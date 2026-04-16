@@ -81,6 +81,46 @@ header {
   text-transform: uppercase;
 }
 
+/* ---- Quick links (commonly used sites) ---- */
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 60%;
+}
+
+.quick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--card-bg);
+  border: 1px solid var(--warm-gray);
+  border-radius: 999px;
+  text-decoration: none;
+  letter-spacing: 0.2px;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.quick-link:hover {
+  background: #fff;
+  border-color: var(--muted);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px var(--shadow);
+}
+
+.quick-link-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 /* ---- Tab cleanup banner ---- */
 .tab-cleanup-banner {
   background: linear-gradient(135deg, rgba(200, 113, 58, 0.04), rgba(200, 113, 58, 0.09));
